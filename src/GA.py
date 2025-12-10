@@ -270,15 +270,13 @@ class GA:
             # cosine sim
             cosine_sim = (candidates_normalized * child_normalized.unsqueeze(0)).sum(dim=1) 
 
-            # find most similar
+            # find most similar and replace if better
             most_similar_local_idx = cosine_sim.argmax()
             most_similar_idx = candidates_idx[most_similar_local_idx]
 
-            # replace if better
             if child_fit > new_fitness[most_similar_idx]:
                 new_pop[most_similar_idx] = children[i]
                 new_fitness[most_similar_idx] = child_fit
-                # update cache
                 pop_normalized[most_similar_idx] = child_normalized
 
         return new_pop, new_fitness
