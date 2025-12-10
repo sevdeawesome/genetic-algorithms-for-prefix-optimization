@@ -222,7 +222,8 @@ class GA:
 
     def __crowding_replacement(self, population, pop_fitness, children, children_fitness):
         """
-        deterministic crowding - children compete with similar parents
+        Deterministic crowding: each child competes with its most similar individual in the population. Similarity is calculated with cosine similarity!
+
         """
         N = population.shape[0]
         C = children.shape[0]
@@ -231,21 +232,54 @@ class GA:
         new_pop = population.clone()
         new_fitness = pop_fitness.clone()
 
+        elite_idx = pop_fitness.argmax().item()
+
+        # get embeddings for children
+        children_vectors = self.__ids_to_vectors(children)  # [C, L, D]
+        L, D = children_vectors.shape[1], children_vectors.shape[2]
+        children_flat = children_vectors.reshape(C, L * D)  # [C, L*D]
+
+        # normalize for cosine sim
+        children_norms = children_flat.norm(dim=1, keepdim=True).clamp(min=1e-8)
+        children_normalized = children_flat / children_norms
+
+        # same for pop
+        pop_vectors = self.__ids_to_vectors(population)  # [N, L, D]
+        pop_flat = pop_vectors.reshape(N, L * D)  # [N, L*D]
+
+        # normalize
+        pop_norms = pop_flat.norm(dim=1, keepdim=True).clamp(min=1e-8)
+        pop_normalized = pop_flat / pop_norms
+
         for i in range(C):
-            child = children[i]
+            child_normalized = children_normalized[i]  # [L*D]
             child_fit = children_fitness[i]
 
-            candidates_idx = torch.randperm(N, device=self.__device)[:cf]
-            candidates = population[candidates_idx]
+            # dont touch the best one
+            non_elite_mask = torch.ones(N, dtype=torch.bool, device=self.__device)
+            non_elite_mask[elite_idx] = False
+            non_elite_indices = torch.where(non_elite_mask)[0]
 
-            # hamming distance
-            distances = (candidates != child.unsqueeze(0)).float().mean(dim=1)
+            # pick random subset to compare against
+            num_candidates = min(cf, len(non_elite_indices))
+            perm = torch.randperm(len(non_elite_indices), device=self.__device)[:num_candidates]
+            candidates_idx = non_elite_indices[perm]
 
-            most_similar_idx = candidates_idx[distances.argmin()]
+            candidates_normalized = pop_normalized[candidates_idx]  
 
+            # cosine sim
+            cosine_sim = (candidates_normalized * child_normalized.unsqueeze(0)).sum(dim=1) 
+
+            # find most similar
+            most_similar_local_idx = cosine_sim.argmax()
+            most_similar_idx = candidates_idx[most_similar_local_idx]
+
+            # replace if better
             if child_fit > new_fitness[most_similar_idx]:
-                new_pop[most_similar_idx] = child
+                new_pop[most_similar_idx] = children[i]
                 new_fitness[most_similar_idx] = child_fit
+                # update cache
+                pop_normalized[most_similar_idx] = child_normalized
 
         return new_pop, new_fitness
 
